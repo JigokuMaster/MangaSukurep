@@ -1,5 +1,6 @@
 # MangaSukurep
-a Manga Downloader written in Python , with a default UI built using urwid tui library.
+
+Manga Downloader written in Python , with a default UI built using urwid tui library.
 
 
 ## background
@@ -27,7 +28,7 @@ under android **TerminalEmulator** using **mcedit** (midnight commander) :) , so
 
 - no fast html parser like lxml.
 
- - for now it can download manga in english translations only , and there are just 2 scrapers see the [./scrapers directory](/scrapers)
+ - for now it can download manga in english translations only , and there are just 2 scrapers see the [scrapers directory](scrapers/)
 
 
 ## requirements & installation 
@@ -42,7 +43,7 @@ should work on python 3.6 , but also it needs the following libraries :
 
 just install them manually using pip .
 
-then download the [latest release](/releases/latest)
+then download the [latest source-code release](https://github.com/JigokuMaster/MangaSukurep/releases/latest)
 
 1 )  - running it in termux 
 
