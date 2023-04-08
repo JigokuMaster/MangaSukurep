@@ -146,7 +146,7 @@ class ChapterDownloader:
                     prog_args = (_ch_list, idx, len(ch_pages))
                     cb = partial(self.handleDownloaderState, extra_args=prog_args)
                     self.dlr.reportState = cb
-                    self.session_holder.disableSessionCache()
+                    self.scraper.disableSessionCache()
                     if self.dlr.downloadFiles(ch_pages.items(), ch):
                          _ch_list.pop(ch)
 
