@@ -2,7 +2,7 @@ import urwid
 from urwid.util import is_mouse_press
 from urwid.command_map import ACTIVATE
 from urwid.signals import connect_signal
-import threading,io
+import threading, os, io, fcntl
 from collections import OrderedDict
 
 
@@ -626,14 +626,14 @@ class ChaptersListWindow(Window):
             items = self.getCheckedItems()
             if len(items):
                 m_title = self.manga_data[0]
-                cb(m_title,items)
+                cb(self, m_title, items)
 
     def downloadAll(self,*args):
         cb = self.actions_handler.downloadChapters
         if cb:
             items = OrderedDict(self.manga_data[4])
             m_title = self.manga_data[0]
-            cb(m_title,items)
+            cb(self, m_title, items)
 
     def addOrRmBookmark(self,*args):
         cb = self.actions_handler.manageBookmarks
@@ -740,6 +740,14 @@ class ChaptersListWindow(Window):
             self.listBox,self.title,footer
         )
         return self
+
+
+class EventDispatcher:
+    def __init__(self, loop, cb):
+        self.fd = loop.watch_pipe(cb)
+
+    def dispatch(self, event):
+        os.write(self.fd, event)
 
 class MainWindow(Window):
     def __init__(self,actions_handler = None):
@@ -911,6 +919,8 @@ class MainWindow(Window):
         return self
 
 
+    def createEventDispatcher(self,cb):
+        return EventDispatcher(mainLoop, cb)
 
     def show(self):
         global screen,mainLoop
