@@ -113,13 +113,12 @@ class DownloaderV1:
 
             try:
                 if not (name in name_list):
-                    url = 'http://127.0.0.11:8080/1.png'
+                    # url = 'http://127.0.0.11:8080/1.png'
                     r = self.session.get(url,timeout = self.timeout)
                     content = r.content
                     content_length = len(content)
                     file_size += content_length
                     zf.writestr(name,content)
-                    time.sleep(3)
 
                 else:
                     content_length = zf.getinfo(name).file_size
