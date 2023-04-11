@@ -1,26 +1,76 @@
-import sys,os
+import sys,os,queue
 from threading import Thread
 from traceback import print_exc,format_exc
 from collections import OrderedDict
 from functools import partial
+from importlib import import_module
 from hurry import filesize
-
-# import internal modules
 
 import scrapers
 import urwid_ui
 from configs import Bookmarks
 from downloadutils import *
 
-class ChapterDownloader:
-    def __init__(self,ui, m_title, scraper):
-        self.ui = ui
+
+class ReqTask(Thread):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.data_queue = queue.Queue(maxsize=1)
+        self.event_dispatcher = None
+
+    def setupEventDispatcher(self, dispatcher):
+        self.event_dispatcher = dispatcher(self.handleEvent)
+
+    def putData(self,**kwargs):
+        self.data_queue.put(kwargs)
+
+    def getData(self):
+        if self.data_queue.empty():
+            return {}
+        else:
+            return self.data_queue.get()
+
+    def sendEvent(self,event,**data):
+        self.putData(**data)
+        if self.event_dispatcher:
+           self.event_dispatcher.dispatch(event.encode())
+
+    def handleEvent(self, event):
+        target_id = event.decode()
+        if hasattr(self, target_id):
+            kwargs = self.getData()
+            target = getattr(self, target_id)
+            return target(**kwargs)
+
+
+
+    def taskFinished(self):
+        pass
+
+    def taskStarted(self):
+        pass
+
+    def taskFailed(self):
+        pass
+
+class ChapterDownloaderTask(ReqTask):
+    ACTION_RE_DOWNLOAD = 0
+    ACTION_SKIP_CHAPTER = 1
+    ACTION_CANCEL_DOWNLOAD = 2
+
+    def __init__(self,executer, m_title, ch_list):
+        super().__init__()
+        self.setupEventDispatcher(executer.getEventDispatcher())
+        self.executer = executer
+        self.m_title = m_title
+        self.ch_list = ch_list
+        self.scraper = executer.currentScraper
+        self.ui = executer.ui.downloadsWindow
         self.ui.actions_handler = self
         self.dl_path = self._getDownloadPath(m_title)
         self.dlr = None
-        self.thread = None
-        self.scraper = scraper
-
+        self.action_queue = queue.Queue(maxsize=1)
+        self.task_canceled = False
 
     def _getDownloadPath(self,chapters_dir):
         # check for user defined path
@@ -34,29 +84,13 @@ class ChapterDownloader:
 
         return os.path.join(dl_path,chapters_dir)
 
-    def updateDLInfo(self, idx, files_count, dlr_args):
-        info = ''
-        if len(dlr_args) == 3:
-            f_name,f_size,dl_bytes = dlr_args
-            str_fsize = filesize.size(f_size)
-            str_dlbytes = filesize.size(dl_bytes)
-            info = f'{f_name}/{files_count} , {str_dlbytes}/{str_fsize}'
 
-        if len(dlr_args) == 2:
-            f_name,f_size = dlr_args
-            str_fsize = filesize.size(f_size)
-            info = f'downloaded-pages:{files_count} - chapter-size:{str_fsize}'
-            self.ui.unCheckChapter(f_name)
 
-        self.ui.updateDownloadInfo(idx, info)
-        self.ui.updateDownloadProg(idx, files_count)
-
-    def handleDownloaderState(self, *dlr_args, extra_args = ()):
-        args = list(dlr_args)
-        state = args.pop(0)
+    def handleDownloaderState(self,dlr_args=None, extra_args=None):
+        state = dlr_args.pop(0)
         ch_list , idx, files_count = extra_args
         if state == DOWNLOADING:
-            f_name,f_size,dl_bytes = args
+            f_name,f_size,dl_bytes = dlr_args
             str_fsize = filesize.size(f_size)
             str_dlbytes = filesize.size(dl_bytes)
             info = f'{f_name}/{files_count} , {str_dlbytes}/{str_fsize}'
@@ -64,7 +98,7 @@ class ChapterDownloader:
             self.ui.updateDownloadProg(idx, files_count)
 
         elif state == FILE_DOWNLOADED:
-            f_name,f_size = args
+            f_name,f_size = dlr_args
             str_fsize = filesize.size(f_size)
             info = f'downloaded-pages:{files_count} - chapter-size:{str_fsize}'
             self.ui.updateDownloadInfo(idx,info)
@@ -72,102 +106,246 @@ class ChapterDownloader:
             self.ui.chapterDownloaded(f_name)
 
         elif state == DOWNLOAD_FAILED:
-            self.handleDLError(args, ch_list)
+            self.handleDLError(*dlr_args, ch_list)
 
-    def handleDLError(self, dlr_args, ch_list):
-        ch,err = dlr_args
-        d_msg = f'failed to download {ch}\n\n{err}'
-        d = self.ui.createDialog(msg=d_msg)
-        def retry(*args):
-            d.hide()
-            self.downloadList(ch_list)
+    def sendDownloaderState(self, *args, extra_args=()):
+        e = 'handleDownloaderState'
+        self.sendEvent(e, dlr_args=list(args) , extra_args=extra_args)
 
 
-        def skip(*args):
-            d.hide()
-            ch_list.update({ch:None})
-            self.downloadList(ch_list)
-
-
-        d.addButton('retry', retry)
-        d.addButton('skip', skip)
-        d.addButton('cancel')
-        d.show()
-
-    def download(self, ch_list):
-        # reverse chapters list
-        r_items = reversed(ch_list.items())
-        r_ch_list = OrderedDict(r_items)
-        r_keys = list(r_ch_list.keys())
-        d = None
-
-        def downloadOrderedList(*args):
-            if d:
-                d.hide()
-
-            self.ui.setup(ch_list.items()).show()
-            self.downloadList(ch_list)
-
-
-        def downloadReversedList(*args):
-            if d:
-                d.hide()
-
-            self.ui.setup(r_ch_list.items()).show()
-            self.downloadList(r_ch_list)
-
-        if len(r_keys) < 2:
-            downloadOrderedList()
-
-        else:
-            first_ch = r_keys[0]
-            last_ch = r_keys[-1]
-            order = f"from '{first_ch}' to '{last_ch}'"
-            d_msg = f'download in reverse order \n\n {order} ?'
-            d = self.ui.parent.createDialog(msg=d_msg)
-            d.addButton('no', downloadOrderedList)
-            d.addButton('yes', downloadReversedList)
-            d.addButton('cancel')
+    def handleDLError(self, ch, err, ch_list):
+        if not self.task_canceled:
+            d_msg = f'failed to download {ch}\n\n{err}'
+            d = self.ui.createDialog(msg=d_msg)
+            d.addButton('retry', self.reDownload)
+            d.addButton('skip', self.skipChapter)
+            d.addButton('cancel',self.cancelDownload)
             d.show()
 
-    def downloadList(self,ch_list):
+
+    def taskFinished(self):
+        return False
+
+    def taskStarted(self):
+        self.ui.setup(self.ch_list.items()).show()
+
+    def taskFailed(self, ch=None, msg=None, ch_list=None):
+        self.handleDLError(ch, msg, ch_list)
+
+    def cancelDownload(self, *args):
+        self.task_canceled = True
+        self.action_queue.put(self.ACTION_CANCEL_DOWNLOAD)
+
+    def reDownload(self, *args):
+        self.action_queue.put(self.ACTION_RE_DOWNLOAD)
+
+    def skipChapter(self, *args):
+        self.action_queue.put(self.ACTION_SKIP_CHAPTER)
+
+    def getUserAction(self):
+        return self.action_queue.get()
+
+
+    def downloadChapter(self, idx, ch, url, ch_list):
+        def _handleUserAction():
+            user_action = self.getUserAction()
+            if user_action == self.ACTION_RE_DOWNLOAD:
+                return self.downloadChapter(idx, ch, url, self.ch_list)
+
+            else:
+                return user_action
+
+        try:
+
+            ch_pages = self.scraper.getChapterPages(url)
+            prog_args = ch_list, idx, len(ch_pages)
+            cb = partial(self.sendDownloaderState, extra_args=prog_args)
+            self.dlr.reportState = cb
+            self.scraper.disableSessionCache()
+            if not self.dlr.downloadFiles(ch_pages.items(), ch):
+                return _handleUserAction()
+
+        except:
+            err = format_exc()
+            event = 'taskFailed'
+            self.sendEvent(event, ch = ch , msg = err , ch_list = ch_list)
+            return _handleUserAction()
+
+
+
+    def run(self):
+        self.sendEvent('taskStarted')
         session = self.scraper.session
         self.dlr = DownloaderV1(self.dl_path, session)
+        items = self.ch_list.items()
+        for idx,item in enumerate(items):
 
-        def run():
-            _ch_list = ch_list.copy()
-            items = ch_list.items()
-            for idx,item in enumerate(items):
-                ch,url = item
-                if url is None:
-                    continue
-                try:
-                    ch_pages = self.scraper.getChapterPages(url)
-                    prog_args = (_ch_list, idx, len(ch_pages))
-                    cb = partial(self.handleDownloaderState, extra_args=prog_args)
-                    self.dlr.reportState = cb
-                    self.scraper.disableSessionCache()
-                    if self.dlr.downloadFiles(ch_pages.items(), ch):
-                         _ch_list.pop(ch)
+            ch,url = item
+            if url is None:
+                continue
 
-                except:
-                    err = format_exc()
-                    self.handleDLError((ch,err), _ch_list)
-                    break
+            user_action = self.downloadChapter(idx, ch, url, self.ch_list)
+            if user_action == self.ACTION_SKIP_CHAPTER:
+                continue
 
+            elif user_action == self.ACTION_CANCEL_DOWNLOAD:
+                break
 
-        if self.thread and self.thread.isAlive():
-            return
+        self.sendEvent('taskFinished')
 
-        else:
-            self.thread = Thread(target=run)
-            self.thread.start()
 
     def cancelDownloads(self):
+        self.task_canceled = True
         if self.dlr:
             self.dlr.cancelDownload()
 
         self.scraper.session.close()
+
+
+class ChaptersFetcherTask(ReqTask):
+    ACTION_RE_FETCH = 0
+    ACTION_CANCEL = 1
+
+    def __init__(self, executer, m_title, m_url):
+        super().__init__()
+        self.setupEventDispatcher(executer.getEventDispatcher())
+        self.executer = executer 
+        self.scraper = executer.currentScraper
+        self.ui = executer.ui
+        self.dialog = None
+        self.m_title = m_title
+        self.m_url = m_url
+        self.action_queue = queue.Queue(maxsize=1)
+        self.task_canceled = False
+
+
+    def cancel(self, *args):
+        self.scraper.session.close()
+        self.task_canceled = True
+        self.action_queue.put(self.ACTION_CANCEL)
+
+    def reFetch(self, *args):
+        self.action_queue.put(self.ACTION_RE_FETCH)
+
+
+    def getUserAction(self):
+        return self.action_queue.get()
+
+
+    def fetch(self):
+        res = None
+        try:
+            self.sendEvent('taskStarted')
+            res = self.scraper.getChapters(self.m_url)
+
+        except:
+            err = format_exc()
+            self.sendEvent('taskFailed', msg=err)
+            user_action = self.getUserAction()
+            if user_action == self.ACTION_RE_FETCH:
+                self.fetch()
+
+        return res
+
+    def run(self):
+        res = self.fetch()
+        self.sendEvent('taskFinished', ch_list=res)
+
+    def taskFinished(self, ch_list=None):
+        if self.task_canceled:
+            return False
+
+        else:
+            self.dialog.hide()
+            if  ch_list:
+                src = self.scraper.name
+                bookmarked = (self.m_title, src, self.m_url) in self.executer.bookmarks
+                manga_data = self.m_title, src, self.m_url, bookmarked, ch_list.items()
+                self.ui.showChaptersList(manga_data)
+
+        return False
+
+    def taskStarted(self):
+        d_msg = f'fetching {self.m_title} chapters list ...'
+        self.dialog = self.ui.createDialog(msg=d_msg)
+        self.dialog.addButton('cancel', self.cancel)
+        self.dialog.show()
+
+    def taskFailed(self, msg=None):
+        self.dialog.setTitle('failed to fetch chapters list')
+        self.dialog.setMessage(msg)
+        self.dialog.addButton('retry', self.reFetch)
+
+class MangaSearchTask(ReqTask):
+    ACTION_RE_SEARCH = 0
+    ACTION_CANCEL = 1
+
+    def __init__(self, executer, m_title):
+        super().__init__()
+        self.setupEventDispatcher(executer.getEventDispatcher())
+        self.executer = executer
+        self.scraper = executer.currentScraper
+        self.ui = executer.ui
+        self.m_title = m_title
+        self.dialog = None
+        self.action_queue = queue.Queue(maxsize=1)
+        self.task_canceled = False
+
+    def cancel(self, *args):
+        self.scraper.session.close()
+        self.task_canceled = True
+        self.action_queue.put(self.ACTION_CANCEL)
+
+    def reSearch(self, *args):
+        self.action_queue.put(self.ACTION_RE_SEARCH)
+
+
+    def getUserAction(self):
+        return self.action_queue.get()
+
+    def search(self):
+        res = None
+        try:
+
+            self.sendEvent('taskStarted')
+            res = self.scraper.search(self.m_title)
+
+        except:
+            err = format_exc()
+            self.sendEvent('taskFailed' , msg=err)
+            user_action = self.getUserAction()
+            if user_action == self.ACTION_RE_SEARCH:
+                self.search()
+
+        return res
+
+    def run(self):
+        res = self.search()
+        self.sendEvent('taskFinished' , search_res=res)
+
+    def taskFinished(self, search_res=None):
+        if self.task_canceled:
+            return False
+
+        else:
+            self.dialog.hide()
+            if search_res:
+                self.executer.showSearchResult(search_res)
+
+        return False
+
+    def taskStarted(self):
+        d_msg = f'searching for {self.m_title}...'
+        self.dialog = self.ui.createDialog(msg=d_msg)
+        self.dialog.addButton('cancel',self.cancel)
+        self.dialog.show()
+
+    def taskFailed(self,msg = None):
+        self.dialog.setTitle('search failed')
+        self.dialog.setMessage(msg)
+        self.dialog.addButton('retry',self.reSearch)
+
+
 
 class Main:
     def __init__(self,ui):
@@ -178,8 +356,10 @@ class Main:
         self.scrapers_dict = self.loadScrapers()
         self.bookmarks = Bookmarks()
 
+    def getEventDispatcher(self):
+        return self.ui.createEventDispatcher
 
-    def manageBookmarks(self,ui,manga_data):
+    def manageBookmarks(self, ui, manga_data):
         title,src,url,bookmarked,ch_list = manga_data
         def rm(*args):
             self.bookmarks.remove(title)
@@ -234,106 +414,83 @@ class Main:
         return self.sources_list
 
 
-    def downloadChapters(self,m_title, ch_list):
-        ui = self.ui.downloadsWindow
-        dlr = ChapterDownloader(ui, m_title , self.currentScraper)
-        dlr.download(ch_list)
+
+    def downloadChapters(self, ui, m_title, ch_list):
+        # reverse chapters list
+        r_items = reversed(ch_list.items())
+        r_ch_list = OrderedDict(r_items)
+        r_keys = list(r_ch_list.keys())
+
+        def downloadOrderedList(*args):
+            ChapterDownloaderTask(self, m_title , ch_list).start()
+
+
+        def downloadReversedList(*args):
+            ChapterDownloaderTask(self, m_title , r_ch_list).start()
+
+        if len(r_keys) < 2:
+            downloadOrderedList()
+
+        else:
+            first_ch = r_keys[0]
+            last_ch = r_keys[-1]
+            order = f"from '{first_ch}' to '{last_ch}'"
+            d_msg = f'download in reverse order \n\n {order} ?'
+            d = ui.createDialog(msg=d_msg)
+            d.addButton('no', downloadOrderedList)
+            d.addButton('yes', downloadReversedList)
+            d.addButton('cancel')
+            d.show()
+
+
+
 
     def fetchChaptersList(self,arg):
-        req_canceled = False
         m_title = str(arg)
+        m_url = None
         if type(arg) == tuple:
             m_title = arg[0]
+            m_url = arg[1]
 
-        d_msg = f'fetching {m_title} chapters list ...'
-        d = self.ui.createDialog(msg=d_msg)
-
-        def retry(*args):
-            self.fetchChaptersList(arg)
-
-        def cancel(*args):
-            nonlocal req_canceled
-            req_canceled = True
-            self.currentScraper.session.close()
-
-        def get(url):
-            try:
-                res = self.currentScraper.getChapters(url)
-                d.hide()
-                if not req_canceled:
-                    src = self.currentScraper.name
-                    bookmarked = (m_title, src, url) in self.bookmarks
-                    manga_data = m_title, src, url, bookmarked, res.items()
-                    self.ui.showChaptersList(manga_data)
-
-            except:
-                msg = format_exc()
-                d.setTitle('failed to fetch chapters list')
-                d.setMessage(msg)
-                d.addButton('retry',retry)
-
-
-        ch_url = None
-        if type(arg) == tuple:
-            ch_url = arg[1]
         else:
-            ch_url = self.searchResult.get(m_title)
+            m_url = self.searchResult.get(m_title)
 
-        if ch_url:
-            d.addButton('cancel',cancel)
-            d.show()
-            t = Thread(target=get, args=(ch_url,) )
-            t.start()
+        task = ChaptersFetcherTask(self, m_title, m_url)
+        task.start()
 
+    def doSearch(self, q):
+        MangaSearchTask(self,q).start()
 
-
-    def doSearch(self,q):
-        req_canceled = False
-        d = self.ui.createDialog(msg=f'searching for {q}...')
-        def retry(*args):
-            self.doSearch(q)
-
-        def cancel(*args):
-            nonlocal req_canceled
-            req_canceled = True
-            self.currentScraper.session.close()
-
-
-        def get(q):
-
-            try:
-
-                self.searchResult = self.currentScraper.search(q)
-                d.hide()
-                if req_canceled:
-                    return
-
-                if self.searchResult:
-                    self.ui.showSearchResult(self.searchResult)
-
-
-
-            except:
-                msg = format_exc()
-                d.setTitle('Search Failed')
-                d.setMessage(msg)
-                d.addButton('retry',retry)
-
-        d.addButton('cancel',cancel)
-        if q:
-            d.show()
-            t = Thread(target=get, args=(q,) )
-            t.start()
-
+    def showSearchResult(self, res):
+        self.searchResult = res
+        self.ui.showSearchResult(res)
 
     def showUIWindow(self):
         self.ui.setup(self.currentScraper.name)
         self.ui.show()
 
+def loadUIModule(name):
+    try:
+        m = import_module(name)
+        return m.MainWindow
+    except:
+        print_exc()
+        print(f'failed to load {name} module')
+
+    print('loading default UI module ...')
+    m = import_module('urwid_ui')
+    return m.MainWindow
+
 
 
 if __name__ == '__main__':
-    # args = sys.argv[1:]
-    Main(urwid_ui.MainWindow).showUIWindow()
+    args = sys.argv[1:]
+    ui = None
+    if args:
+        name = f'{args[0]}_ui'
+        ui = loadUIModule(name)
+    else:
+        ui = loadUIModule('urwid_ui')
 
+    Main(ui).showUIWindow()
 
