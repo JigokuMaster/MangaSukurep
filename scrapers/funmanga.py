@@ -107,25 +107,7 @@ class ScraperImpl(Scraper):
 def test_scraper():
     global test
     test = True
-    ms = ScraperImpl()
-    print(f'#tesing {ms.name} scraper\n')
-    print('#fetching search result')
-    res = ms.search('one')
-    m_link = ''
-    for i,n in enumerate(res['names']):
-        m_link = res['links'][i]
-        print(n,f'link : {m_link}',sep = '\n\n',end = '\n\n')
-
-    print('#fetching chapters list',end = '\n\n')
-    res = ms.getChapters(m_link)
-    ch_link = ''
-    for i,ch in enumerate(res['names']):
-        ch_link = res['links'][i]
-        print(ch,f'link : {ch_link}',sep = '\n\n',end = '\n\n')
-
-    print('\n\n#fetching chapter images')
-    for img_fn,link in ms.getChapterPages(ch_link):
-        print(img_fn,link,sep = '\n\n',end = '\n\n')
+    s = ScraperImpl()
 
 if __name__ == '__main__':
    test_scraper()

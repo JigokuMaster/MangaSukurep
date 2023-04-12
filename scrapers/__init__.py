@@ -2,7 +2,7 @@ import os,sys
 from traceback import print_exc
 
 
-def load() -> dict:
+def load():
     pkg_path = __path__[0]
     sys.path.append(pkg_path)
     scrapers = {}
