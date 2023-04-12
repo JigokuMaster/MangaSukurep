@@ -243,7 +243,7 @@ class ChaptersFetcherTask(ReqTask):
             self.sendEvent('taskFailed', msg=err)
             user_action = self.getUserAction()
             if user_action == self.ACTION_RE_FETCH:
-                self.fetch()
+                res = self.fetch()
 
         return res
 
@@ -315,7 +315,7 @@ class MangaSearchTask(ReqTask):
             self.sendEvent('taskFailed' , msg=err)
             user_action = self.getUserAction()
             if user_action == self.ACTION_RE_SEARCH:
-                self.search()
+                res = self.search()
 
         return res
 
