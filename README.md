@@ -117,6 +117,21 @@ $ MDL_PATH=~/downloads python main.py
 - pressing ( UP | DOWN | PAGE-UP | PAGE-DOWN ) keys , scroll long error message content
 
 
+## some screenshots taken from termux
+
+![Main Window](https://raw.github.com/JigokuMaster/MangaSukurep/main/Screenshots/Termux_4.jpg)
+
+
+![Chapters List Window](https://raw.github.com/JigokuMaster/MangaSukurep/main/Screenshots/Termux_5.jpg)
+
+
+![Downloader Window](https://raw.github.com/JigokuMaster/MangaSukurep/main/Screenshots/Termux_1.jpg)
+
+
+
+
+
+
 
 
 
