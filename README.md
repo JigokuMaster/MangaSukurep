@@ -43,7 +43,7 @@ should work on python 3.6 , but also it needs the following libraries :
 
 just install them manually using pip .
 
-then download the [latest source-code release](https://github.com/JigokuMaster/MangaSukurep/releases/latest)
+then download the [ source-code ](https://github.com/JigokuMaster/MangaSukurep/releases/)
 
 1 )  - running it in termux 
 
@@ -52,7 +52,7 @@ you can press the keyboard toggle in
 extra keys or left drawer to show it.
 
 anyway after downloading just
-extract  it , then
+extract  it .
 
 $ cd MangaSukurep
 
@@ -106,7 +106,7 @@ $ MDL_PATH=~/downloads python main.py
 
 3 ) dialog windows :
 
-- pressing ( c ) key , hide / close the dialog or cancel https requests ,though it's unstable.
+- pressing ( c ) key , hide / close the dialog .
 
 -  pressing ( r ) key , retry failed action.
 
