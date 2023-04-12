@@ -119,13 +119,13 @@ $ MDL_PATH=~/downloads python main.py
 
 ## some screenshots taken from termux
 
-![Main Window](https://raw.github.com/JigokuMaster/MangaSukurep/main/Screenshots/Termux_4.jpg)
+![Main Window](https://github.com/JigokuMaster/MangaSukurep/raw/main/Screenshots/Termux_4.jpg)
 
 
-![Chapters List Window](https://raw.github.com/JigokuMaster/MangaSukurep/main/Screenshots/Termux_5.jpg)
+![Chapters List Window](https://github.com/JigokuMaster/MangaSukurep/raw/main/Screenshots/Termux_5.jpg)
 
 
-![Downloader Window](https://raw.github.com/JigokuMaster/MangaSukurep/main/Screenshots/Termux_1.jpg)
+![Downloader Window](https://github.com/JigokuMaster/MangaSukurep/raw/main/Screenshots/Termux_1.jpg)
 
 
 
